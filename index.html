@@ -3,7 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Secure Video Content Hub</title>
+  <title>Secure Video Content Hub | JZK Medical Academy</title>
+  
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="Access secure, role-based medical video content at JZK Medical Academy. Verified members and admins can upload and watch educational videos.">
+  <meta name="keywords" content="Medical Academy, Secure Video Hub, Educational Videos, JZK, Firestore, Firebase">
+  <meta name="author" content="JZK Medical Academy">
+
+  <!-- Open Graph (Facebook, LinkedIn) -->
+  <meta property="og:title" content="Secure Video Content Hub | JZK Medical Academy">
+  <meta property="og:description" content="Role-based secure video content hub for medical education.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://your-domain.com/">
+  <meta property="og:image" content="https://your-domain.com/preview.jpg">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Secure Video Content Hub | JZK Medical Academy">
+  <meta name="twitter:description" content="Verified members can access secure medical video content.">
+  <meta name="twitter:image" content="https://your-domain.com/preview.jpg">
+
+  <!-- Structured Data for Google -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGallery",
+    "name": "Secure Video Content Hub",
+    "url": "https://your-domain.com/",
+    "description": "Role-based secure video content hub for medical education.",
+    "creator": {
+      "@type": "Organization",
+      "name": "JZK Medical Academy"
+    }
+  }
+  </script>
+
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -12,16 +46,24 @@
 </head>
 <body class="bg-gray-50">
 
+  <!-- Static fallback for SEO -->
+  <noscript>
+    <main class="max-w-2xl mx-auto p-6">
+      <h1>Secure Video Content Hub - JZK Medical Academy</h1>
+      <p>Access educational videos securely with role-based authentication. Please enable JavaScript for the full experience.</p>
+    </main>
+  </noscript>
+
+  <!-- App Container -->
   <div id="app-container" class="min-h-screen p-4 sm:p-8 font-sans"></div>
 
   <!-- Firebase SDK -->
   <script type="module">
-    // Import Firebase SDKs
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
     import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, getDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
 
-    // --- Your Firebase Config ---
+    // --- Firebase Config ---
     const firebaseConfig = {
       apiKey: "AIzaSyAuRYUMj--teABPMoesz8H4olnEP6m9f5c",
       authDomain: "jzkmedicalacademy.firebaseapp.com",
@@ -32,61 +74,31 @@
       measurementId: "G-D531515KZX"
     };
 
-    // --- App-wide Vars ---
+    // --- App Vars ---
     const appId = "default-app-id";
     const CONFIG_PATH = `artifacts/${appId}/public/data/config`;
     const VIDEOS_COLLECTION_PATH = `artifacts/${appId}/public/data/videos`;
     const getUserProfilePath = (uid) => `artifacts/${appId}/users/${uid}/profile/status`;
 
-    let db = null, auth = null, userId = null;
-    let isAuthReady = false, isAdmin = false, isMemberVerified = false;
+    let db, auth, userId, isAuthReady = false, isAdmin = false, isMemberVerified = false;
     let videos = [], statusMessage = '';
 
-    // --- UI Helpers ---
-    const StatusCard = (message, iconSvg, colorClass = 'text-gray-500') => `
-      <div class="flex flex-col items-center justify-center p-8 bg-white rounded-xl shadow-inner border border-gray-100">
-        <div class="p-3 rounded-full ${colorClass} bg-opacity-10 mb-4">${iconSvg}</div>
-        <p class="text-lg font-medium text-gray-700 text-center max-w-sm">${message}</p>
-      </div>
-    `;
-
-    const Button = (text, iconSvg, id, primary = true, disabled = false, className = '') => `
-      <button id="${id}" ${disabled ? 'disabled' : ''} 
-        class="flex items-center justify-center space-x-2 px-6 py-3 text-base font-semibold rounded-xl transition duration-300 shadow-lg
-               ${primary ? 'bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400'
-                         : 'bg-gray-200 hover:bg-gray-300 text-gray-800 disabled:bg-gray-100'}
-               ${disabled ? 'cursor-not-allowed opacity-75' : 'hover:scale-[1.02]'} ${className}">
-        ${iconSvg}<span>${text}</span>
-      </button>
-    `;
-
-    // --- Firebase Init ---
+    // --- Init Firebase ---
     const initFirebase = () => {
-      try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        auth = getAuth(app);
-
-        onAuthStateChanged(auth, async (user) => {
-          if (user) {
-            userId = user.uid;
-          } else {
-            await signInAnonymously(auth);
-          }
-          isAuthReady = true;
-          await checkUserStatus();
-          startListeners();
-          renderApp();
-        });
-      } catch (e) {
-        console.error("Error initializing Firebase:", e);
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      onAuthStateChanged(auth, async (user) => {
+        userId = user ? user.uid : null;
+        if (!user) await signInAnonymously(auth);
         isAuthReady = true;
-        statusMessage = "Failed to connect to Firebase.";
+        await checkUserStatus();
+        startListeners();
         renderApp();
-      }
+      });
     };
 
-    // --- User Role Check ---
+    // --- User Roles ---
     const checkUserStatus = async () => {
       if (!db || !userId) return;
       try {
@@ -100,128 +112,83 @@
           } else currentAdminId = adminDoc.data().adminUid;
         });
         isAdmin = userId === currentAdminId;
-
-        const profileDocRef = doc(db, getUserProfilePath(userId));
-        const profileDoc = await getDoc(profileDocRef);
+        const profileDoc = await getDoc(doc(db, getUserProfilePath(userId)));
         isMemberVerified = profileDoc.exists() ? profileDoc.data().verified === true : false;
-      } catch (err) {
-        console.error("Error checking user status:", err);
-        statusMessage = "Could not verify user roles.";
-      }
+      } catch (err) { console.error("Role check error:", err); }
     };
 
     // --- Firestore Listeners ---
     const startListeners = () => {
       if (!db) return;
-      const videosQuery = query(collection(db, VIDEOS_COLLECTION_PATH));
-      onSnapshot(videosQuery, (snapshot) => {
-        videos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
-                   .sort((a, b) => b.timestamp - a.timestamp);
+      const q = query(collection(db, VIDEOS_COLLECTION_PATH));
+      onSnapshot(q, (snap) => {
+        videos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+                 .sort((a, b) => b.timestamp - a.timestamp);
         renderApp();
       });
     };
 
-    // --- Toggle Verification ---
-    const toggleVerificationStatus = async () => {
-      if (!db || !userId) return;
-      const newStatus = !isMemberVerified;
-      try {
-        await setDoc(doc(db, getUserProfilePath(userId)), { verified: newStatus }, { merge: true });
-        isMemberVerified = newStatus;
-        statusMessage = newStatus ? "You are now a Verified Member!" : "Verification revoked.";
-        renderApp();
-      } catch (err) {
-        console.error("Error toggling verification:", err);
-        statusMessage = "Failed to update verification.";
-        renderApp();
-      }
-    };
-
-    // --- Admin Upload ---
-    const handleUpload = async (e) => {
-      e.preventDefault();
-      const form = e.target;
-      const title = form.querySelector('#title').value.trim();
-      const url = form.querySelector('#url').value.trim();
-      const btn = form.querySelector('#upload-button');
-      if (!title || !url) return;
-
-      btn.disabled = true; btn.innerHTML = '<span>Adding...</span>';
-      try {
-        await addDoc(collection(db, VIDEOS_COLLECTION_PATH), {
-          title, url, timestamp: Date.now(), uploadedBy: userId
-        });
-        form.reset();
-        statusMessage = "Video saved!";
-      } catch (err) {
-        console.error("Error adding doc:", err);
-        statusMessage = "Failed to add video.";
-      } finally {
-        btn.disabled = false;
-        renderApp();
-      }
-    };
-
-    // --- Render App ---
+    // --- Render App (SEO-friendly markup) ---
     const renderApp = () => {
-      const container = document.getElementById('app-container');
+      const container = document.getElementById("app-container");
       if (!isAuthReady || !db || !userId) {
-        container.innerHTML = StatusCard("Setting up authentication...", "🔄", "text-blue-600");
+        container.innerHTML = `<section><h2>Loading...</h2><p>Setting up authentication...</p></section>`;
         return;
       }
       const roleDisplay = isAdmin ? "Admin" : (isMemberVerified ? "Verified Member" : "Guest");
-      const roleColor = isAdmin ? "text-red-500" : (isMemberVerified ? "text-green-500" : "text-gray-500");
-
-      let header = `
-        <header class="mb-10 p-6 bg-white rounded-xl shadow-2xl border-b-4 border-blue-600/50">
-          <h1 class="text-4xl font-extrabold mb-2">Secure Video Content Hub</h1>
-          <p class="text-gray-600 mb-4">Role-based access demo.</p>
-          <div class="flex justify-between items-center p-4 bg-blue-50 rounded-lg border">
-            <div>
-              <p>User ID: <span class="ml-1 font-mono text-xs bg-blue-100 px-2 py-0.5 rounded">${userId}</span></p>
-              <p>Your Role: <span class="ml-1 font-bold ${roleColor}">${roleDisplay}</span></p>
-            </div>
-            ${!isAdmin ? Button(
-              isMemberVerified ? "Revoke Verification" : "Simulate Verification",
-              "✔️", "toggle-verification-btn",
-              !isMemberVerified, false, "w-auto"
-            ) : ""}
-          </div>
+      let html = `
+        <header class="mb-10">
+          <h1 class="text-3xl font-bold">Secure Video Content Hub</h1>
+          <p class="text-gray-600">Access educational videos securely with role-based authentication.</p>
+          <p><strong>Role:</strong> ${roleDisplay}</p>
         </header>
+        <main>
       `;
-
-      let main = "";
       if (isAdmin) {
-        main += `
-          <form id="upload-form" class="p-6 bg-white rounded-xl shadow-lg mb-6">
-            <h2 class="text-xl font-bold mb-4">Admin Video Uploader</h2>
-            <input id="title" type="text" placeholder="Video Title" class="block w-full mb-2 p-2 border rounded"/>
-            <input id="url" type="url" placeholder="Video URL" class="block w-full mb-2 p-2 border rounded"/>
-            ${Button("Add Video", "➕", "upload-button")}
-          </form>
+        html += `
+          <section>
+            <h2>Upload New Video</h2>
+            <form id="upload-form" class="mb-6">
+              <input id="title" type="text" placeholder="Video Title" required class="border p-2 mb-2 w-full"/>
+              <input id="url" type="url" placeholder="Video URL" required class="border p-2 mb-2 w-full"/>
+              <button id="upload-button" class="bg-blue-600 text-white px-4 py-2 rounded">Add Video</button>
+            </form>
+          </section>
         `;
       }
       if (isAdmin || isMemberVerified) {
-        main += videos.length === 0
-          ? StatusCard("No videos uploaded yet.", "📹", "text-yellow-600")
-          : `<div class="grid gap-4">${videos.map(v => `
-               <div class="bg-white p-4 rounded shadow">
-                 <h3 class="font-bold">${v.title}</h3>
-                 <p class="text-sm text-gray-500">${new Date(v.timestamp).toLocaleString()}</p>
-                 <a href="${v.url}" target="_blank" class="text-blue-600">Watch</a>
-               </div>`).join("")}</div>`;
+        html += `
+          <section>
+            <h2>Available Videos</h2>
+            ${videos.length === 0 
+              ? "<p>No videos uploaded yet.</p>" 
+              : videos.map(v => `
+                  <article class="border p-4 mb-3 rounded">
+                    <h3 class="font-bold">${v.title}</h3>
+                    <p>Uploaded on ${new Date(v.timestamp).toLocaleDateString()}</p>
+                    <a href="${v.url}" target="_blank" rel="noopener" class="text-blue-600">Watch Video</a>
+                  </article>
+                `).join("")}
+          </section>
+        `;
       } else {
-        main += StatusCard("You must be verified to view videos.", "🔒", "text-red-600");
+        html += `<section><p>You must be a verified member to view video content.</p></section>`;
       }
+      html += `</main>`;
+      container.innerHTML = html;
 
-      container.innerHTML = header + `<main>${main}</main>`;
-
-      // Event bindings
-      const toggleBtn = document.getElementById("toggle-verification-btn");
-      if (toggleBtn) toggleBtn.addEventListener("click", toggleVerificationStatus);
+      // Bind Events
       if (isAdmin) {
-        const form = document.getElementById("upload-form");
-        if (form) form.addEventListener("submit", handleUpload);
+        document.getElementById("upload-form")?.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const title = e.target.title.value.trim();
+          const url = e.target.url.value.trim();
+          if (!title || !url) return;
+          await addDoc(collection(db, VIDEOS_COLLECTION_PATH), {
+            title, url, timestamp: Date.now(), uploadedBy: userId
+          });
+          e.target.reset();
+        });
       }
     };
 
