@@ -1,0 +1,414 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, getDoc, runTransaction } from 'firebase/firestore';
+import { Loader2, PlusCircle, Video, Lock, UserCheck, Shield } from 'lucide-react';
+
+// --- Global Variable Configuration (DO NOT CHANGE) ---
+// These variables are provided by the canvas environment.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// --- Firestore Path Helpers ---
+const CONFIG_PATH = `artifacts/${appId}/public/data/config`;
+const VIDEOS_COLLECTION_PATH = `artifacts/${appId}/public/data/videos`;
+const getUserProfilePath = (uid) => `artifacts/${appId}/users/${uid}/profile/status`;
+
+// --- UI Components ---
+
+/**
+ * A reusable button component with Tailwind styling.
+ */
+const Button = ({ children, onClick, disabled, className = '', Icon, primary = true }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`
+      flex items-center justify-center space-x-2 px-6 py-3 text-base font-semibold rounded-xl transition duration-300 shadow-lg
+      ${primary
+        ? 'bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400'
+        : 'bg-gray-200 hover:bg-gray-300 text-gray-800 disabled:bg-gray-100'}
+      ${disabled ? 'cursor-not-allowed opacity-75' : 'hover:scale-[1.02]'}
+      ${className}
+    `}
+  >
+    {Icon && <Icon className="w-5 h-5" />}
+    <span>{children}</span>
+  </button>
+);
+
+/**
+ * Displays a loading state or a specific status message.
+ */
+const StatusCard = ({ children, Icon, colorClass = 'text-gray-500' }) => (
+  <div className="flex flex-col items-center justify-center p-8 bg-white rounded-xl shadow-inner border border-gray-100">
+    <div className={`p-3 rounded-full ${colorClass} bg-opacity-10 mb-4`}>
+      <Icon className="w-10 h-10" />
+    </div>
+    <p className="text-lg font-medium text-gray-700 text-center max-w-sm">{children}</p>
+  </div>
+);
+
+// --- Main Components ---
+
+/**
+ * Component for Admin users to upload new video links.
+ */
+const VideoUploader = ({ db, userId, onVideoAdded }) => {
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!title.trim() || !url.trim()) {
+      setMessage('Both title and URL are required.');
+      return;
+    }
+    setIsLoading(true);
+    setMessage('');
+
+    // Simple validation for a YouTube or general video link
+    const validUrl = url.trim().startsWith('http');
+
+    if (!validUrl) {
+      setMessage('Please enter a valid URL (must start with http/https).');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, VIDEOS_COLLECTION_PATH), {
+        title: title.trim(),
+        url: url.trim(),
+        timestamp: Date.now(),
+        uploadedBy: userId,
+      });
+      setTitle('');
+      setUrl('');
+      setMessage('Video added successfully!');
+      onVideoAdded();
+    } catch (error) {
+      console.error('Error adding document: ', error);
+      setMessage('Failed to add video. Check console for details.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="p-6 bg-white rounded-xl shadow-2xl border border-blue-100">
+      <h2 className="text-2xl font-bold text-gray-900 mb-4 flex items-center">
+        <Shield className="w-6 h-6 mr-2 text-blue-600" /> Admin Video Uploader
+      </h2>
+      <p className="text-gray-600 mb-6">You are the designated administrator. Add new videos for verified members.</p>
+      <form onSubmit={handleUpload} className="space-y-4">
+        <div>
+          <label htmlFor="title" className="block text-sm font-medium text-gray-700">Video Title</label>
+          <input
+            id="title"
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="e.g., Introduction to Firestore"
+            disabled={isLoading}
+          />
+        </div>
+        <div>
+          <label htmlFor="url" className="block text-sm font-medium text-gray-700">Video URL (e.g., YouTube Link)</label>
+          <input
+            id="url"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="https://youtube.com/watch?v=..."
+            disabled={isLoading}
+          />
+        </div>
+        <Button type="submit" Icon={PlusCircle} disabled={isLoading} className="w-full">
+          {isLoading ? 'Adding...' : 'Add Video'}
+        </Button>
+        {message && (
+          <p className={`text-sm mt-3 font-medium ${message.includes('success') ? 'text-green-600' : 'text-red-600'}`}>
+            {message}
+          </p>
+        )}
+      </form>
+    </div>
+  );
+};
+
+/**
+ * Component for Verified Members to view the video list.
+ */
+const VideoList = ({ videos }) => {
+  if (videos.length === 0) {
+    return (
+      <StatusCard Icon={Video} colorClass="text-yellow-600">
+        No videos have been uploaded yet. Please ask the administrator to add some content.
+      </StatusCard>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold text-gray-900 mb-4 flex items-center">
+        <Video className="w-6 h-6 mr-2 text-green-600" /> Member Video Content
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {videos.map((video) => (
+          <div key={video.id} className="bg-white rounded-xl shadow-lg overflow-hidden transition duration-300 hover:shadow-xl border border-green-100">
+            <div className="p-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2 truncate">{video.title}</h3>
+              <p className="text-sm text-gray-500 mb-4">Uploaded: {new Date(video.timestamp).toLocaleDateString()}</p>
+              <a 
+                href={video.url} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="inline-flex items-center text-blue-600 hover:text-blue-800 transition duration-150 font-medium"
+              >
+                Watch Video 
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 ml-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                </svg>
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// --- Main Application Component ---
+
+export default function App() {
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isMemberVerified, setIsMemberVerified] = useState(false);
+  const [videos, setVideos] = useState([]);
+  const [statusMessage, setStatusMessage] = useState('');
+
+  // 1. Initialize Firebase and set up Auth listener
+  useEffect(() => {
+    if (Object.keys(firebaseConfig).length === 0) {
+      console.error("Firebase config is missing.");
+      return;
+    }
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const authInstance = getAuth(app);
+      setDb(firestore);
+      setAuth(authInstance);
+
+      // Set up authentication listener
+      const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+        if (user) {
+          setUserId(user.uid);
+          // Attempt to sign in with custom token if available (Canvas environment)
+          // If already signed in, this is just to ensure state is correct.
+        } else if (initialAuthToken) {
+           // Use custom token if provided
+            try {
+                await signInWithCustomToken(authInstance, initialAuthToken);
+            } catch (error) {
+                console.error("Custom token sign-in failed, signing in anonymously.", error);
+                await signInAnonymously(authInstance);
+            }
+        } else {
+          // Default to anonymous sign-in
+          await signInAnonymously(authInstance);
+        }
+        setIsAuthReady(true);
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Error initializing Firebase:", e);
+      setIsAuthReady(true);
+      setStatusMessage("Failed to connect to Firebase. Check console for details.");
+    }
+  }, []);
+
+  // 2. Function to check and set admin/member status
+  const checkUserStatus = useCallback(async (currentDb, currentUserId) => {
+    if (!currentDb || !currentUserId) return;
+
+    try {
+      // --- Admin Check: The first user to use the app is set as the admin ---
+      let currentAdminId = null;
+      const adminDocRef = doc(currentDb, CONFIG_PATH, 'admin_id');
+
+      await runTransaction(currentDb, async (transaction) => {
+        const adminDoc = await transaction.get(adminDocRef);
+
+        if (!adminDoc.exists()) {
+          // First user. Set them as admin.
+          transaction.set(adminDocRef, { adminUid: currentUserId });
+          currentAdminId = currentUserId;
+        } else {
+          currentAdminId = adminDoc.data().adminUid;
+        }
+      });
+      
+      const isCurrentUserAdmin = currentUserId === currentAdminId;
+      setIsAdmin(isCurrentUserAdmin);
+
+      // --- Member Verification Check (Private Data) ---
+      const profileDocRef = doc(currentDb, getUserProfilePath(currentUserId));
+      const profileDoc = await getDoc(profileDocRef);
+
+      const isVerified = profileDoc.exists() ? profileDoc.data().verified === true : false;
+      setIsMemberVerified(isVerified);
+
+    } catch (error) {
+      console.error("Error checking user status:", error);
+      setStatusMessage("Could not verify user roles. Check console.");
+      setIsAdmin(false);
+      setIsMemberVerified(false);
+    }
+  }, []);
+
+  // 3. Effect to run status check once auth is ready
+  useEffect(() => {
+    if (isAuthReady && db && userId) {
+      checkUserStatus(db, userId);
+    }
+  }, [isAuthReady, db, userId, checkUserStatus]);
+
+  // 4. Effect to listen for videos
+  useEffect(() => {
+    if (!db) return;
+
+    const videosQuery = query(collection(db, VIDEOS_COLLECTION_PATH));
+
+    const unsubscribe = onSnapshot(videosQuery, (snapshot) => {
+      const videoData = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      })).sort((a, b) => b.timestamp - a.timestamp); // Sort newest first
+      setVideos(videoData);
+    }, (error) => {
+      console.error("Error fetching videos:", error);
+      setStatusMessage("Error fetching videos. Data access might be restricted.");
+    });
+
+    return () => unsubscribe();
+  }, [db]);
+
+  // --- Interaction Handlers ---
+
+  const toggleVerificationStatus = async () => {
+    if (!db || !userId) return;
+
+    setStatusMessage('');
+    const newStatus = !isMemberVerified;
+    const profileDocRef = doc(db, getUserProfilePath(userId));
+
+    try {
+      await setDoc(profileDocRef, { verified: newStatus }, { merge: true });
+      setIsMemberVerified(newStatus);
+    } catch (error) {
+      console.error("Error toggling verification:", error);
+      setStatusMessage("Failed to update verification status.");
+    }
+  };
+
+  // --- Render Logic ---
+
+  if (!isAuthReady || !db || !userId) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-gray-50">
+        <StatusCard Icon={Loader2} colorClass="text-blue-600">
+          <Loader2 className="animate-spin w-6 h-6 mx-auto mb-2" />
+          Setting up library and authentication...
+        </StatusCard>
+      </div>
+    );
+  }
+
+  const roleDisplay = isAdmin ? 'Admin' : (isMemberVerified ? 'Verified Member' : 'Unverified Guest');
+  const roleColor = isAdmin ? 'text-red-500' : (isMemberVerified ? 'text-green-500' : 'text-gray-500');
+
+  let content;
+  if (isAdmin) {
+    // Admin sees the uploader and the video list
+    content = (
+      <>
+        <div className="mb-8">
+          <VideoUploader db={db} userId={userId} onVideoAdded={() => setStatusMessage('Video saved!')} />
+        </div>
+        <VideoList videos={videos} />
+      </>
+    );
+  } else if (isMemberVerified) {
+    // Verified Members see the video list
+    content = <VideoList videos={videos} />;
+  } else {
+    // Unverified Guests see a lock screen
+    content = (
+      <StatusCard Icon={Lock} colorClass="text-red-600">
+        You must be a verified paying member to access the video content.
+      </StatusCard>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+      <div className="max-w-6xl mx-auto">
+        
+        {/* Header and Status Card */}
+        <header className="mb-10 p-6 bg-white rounded-xl shadow-2xl border-b-4 border-blue-600/50">
+            <h1 className="text-4xl font-extrabold text-gray-900 mb-2">Secure Video Content Hub</h1>
+            <p className="text-gray-600 mb-4">Role-based access demonstration.</p>
+
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center space-y-4 md:space-y-0 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="text-sm font-medium">
+                    <p className="text-gray-800 flex items-center mb-1">
+                        <UserCheck className="w-4 h-4 mr-2" />
+                        Your User ID: <span className="ml-1 font-mono text-xs bg-blue-100 px-2 py-0.5 rounded text-blue-700">{userId}</span>
+                    </p>
+                    <p className="flex items-center">
+                        Your Role: <span className={`ml-1 font-bold ${roleColor}`}>{roleDisplay}</span>
+                    </p>
+                </div>
+                
+                {/* Role Management/Simulation */}
+                {!isAdmin && (
+                    <Button 
+                        onClick={toggleVerificationStatus}
+                        Icon={isMemberVerified ? Lock : UserCheck}
+                        primary={!isMemberVerified}
+                        className="w-full md:w-auto"
+                    >
+                        {isMemberVerified ? 'Revoke Verification (Go to Guest)' : 'Simulate Verification (Become Member)'}
+                    </Button>
+                )}
+            </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="mt-8">
+          {statusMessage && (
+            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded" role="alert">
+              <p className="font-bold">Status Update</p>
+              <p>{statusMessage}</p>
+            </div>
+          )}
+          {content}
+        </main>
+      </div>
+    </div>
+  );
+}
